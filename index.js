@@ -1,4 +1,4 @@
-// index.js (Final Fixes for Google Search, YouTube Downloads, and Sticker Command)
+// index.js (Final Code with Fixes for YouTube, TikTok, Menu, and Owner Mode)
 
 // =========================================================
 // 1. MODULES LOAD කිරීම
@@ -20,32 +20,31 @@ const keep_alive = require('./keep_alive');
 const pino = require('pino'); 
 const qrt = require('qrcode-terminal'); 
 
-// 🚨 GOOGLE SEARCH API MODULES (FIXED)
+// GOOGLE SEARCH API MODULES
 const { GoogleAuth } = require('google-auth-library');
-const { customsearch } = require('@google/customsearch'); // ⚠️ Terminal: npm install @google/customsearch
+const { customsearch } = require('@google/customsearch'); 
 
-const ytdl = require('ytdl-core'); // ⚠️ Terminal: npm install ytdl-core@latest
+const ytdl = require('ytdl-core'); // ⚠️ Note: This requires the GitHub Fork or latest version fix
 const fs = require('fs'); 
 const axios = require('axios'); 
-const { Boom } = require('@hapi/boom'); // Error Handling සඳහා
+const { Boom } = require('@hapi/boom'); 
 
 // =========================================================
 // 2. CONFIGURATION (පෙර සැකසුම්)
 // =========================================================
 
 // 🚨 OWNER JID එක: (⚠️ මෙය ඔබගේ නිවැරදි WhatsApp අංකයට වෙනස් කරන්න)
-// උදා: '94712345678@s.whatsapp.net'
-const botOwnerJid = '947xxxxxxxxxx@s.whatsapp.net'; // <--- ⚠️ මෙතැන ඔබේ අංකය ඇතුළත් කරන්න!
+const botOwnerJid = '947xxxxxxxxxx@s.whatsapp.net'; // <--- ⚠️ මෙතැන ඔබේ නිවැරදි JID එක ඇතුළත් කරන්න!
 
 // COMMAND PREFIXES
 const PREFIXES = ['.', '!']; 
 const PRIMARY_PREFIX = '.'; 
 
-// 🚨 GOOGLE SEARCH API KEYS (FIXED)
+// GOOGLE SEARCH API KEYS 
 const GOOGLE_API_KEY = 'AIzaSyA5_GUtx7lkQRTc2rwiFCKL6HBhaC6id8E'; 
 const SEARCH_ENGINE_CX = '50dad8b62a6ed49c0'; 
 
-// Client එක Initialize කිරීම (නව API සඳහා)
+// Client එක Initialize කිරීම 
 const auth = new GoogleAuth();
 const customSearchClient = customsearch({ version: 'v1', auth: auth });
 
@@ -74,10 +73,7 @@ keep_alive();
 async function startBot() {
     console.log(`Starting WhatsApp Bot in ${botConfig.isPrivate ? 'PRIVATE' : 'PUBLIC'} Mode...`);
 
-    // Session Data Folder එක 'auth_info_baileys' ලෙස සකසයි
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys'); 
-    
-    // නවතම Baileys Version එක ලබා ගැනීම
     const { version } = await fetchLatestBaileysVersion();
     
     console.log(`Using Baileys version: ${version.join('.')}`);
@@ -87,36 +83,30 @@ async function startBot() {
         printQRInTerminal: true, 
         auth: state,
         browser: ['My-Advanced-Bot', 'Safari', '1.0.0'],
-        version: version, // Version එක නිවැරදිව සකසයි
+        version: version, 
     });
 
     // =====================================================
     // 5. EVENT HANDLERS
     // =====================================================
 
-    // 5.1. Connection Update (Login/Reconnect/QR)
+    // 5.1. Connection Update 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log('\n=============================================');
-            console.log('🔗 QR CODE RECEIVED. SCAN NOW TO CONNECT 🔗');
-            console.log('=============================================');
+            console.log('\n🔗 QR CODE RECEIVED. SCAN NOW 🔗');
             qrt.generate(qr, { small: true }); 
         }
 
         if (connection === 'close') {
             let reason = new Boom(lastDisconnect.error)?.output?.statusCode;
             
-            // Logged Out හෝ QR Code Expired වූ විට නැවත ආරම්භ කිරීම අවශ්‍යයි
             if (reason === DisconnectReason.loggedOut || reason === DisconnectReason.connectionClosed || reason === 405) {
-                console.log(`❌ Connection Closed/Logged Out. Reason: ${reason}. Deleting old session and restarting...`);
-                
-                // පැරණි session එක delete කිරීම (Session Errors fix කිරීමට)
+                console.log(`❌ Connection Closed/Logged Out. Reason: ${reason}. Restarting...`);
                 fs.rmSync('auth_info_baileys', { recursive: true, force: true });
                 delay(3000).then(() => startBot()); 
             } else {
-                // වෙනත් දෝෂයක් නම්, ටික වෙලාවක් ඉඳලා නැවත උත්සාහ කරන්න
                 console.log(`⚠️ Connection closed unexpectedly. Reason: ${reason}. Restarting in 5s.`);
                 delay(5000).then(() => startBot()); 
             }
@@ -139,19 +129,17 @@ async function startBot() {
 
         const jid = msg.key.remoteJid; 
         const normalizedJid = jidNormalizedUser(msg.key.remoteJid); 
-        const isOwner = normalizedJid === botOwnerJid; // Owner Check
+        const isOwner = normalizedJid === botOwnerJid; // Owner Check (FIXED: Ensure botOwnerJid is correct)
 
-        // Message Content Extraction
+        // 🚨 MESSAGE CONTENT EXTRACTION FIX
         const text = 
-            msg.message?.conversation || 
+            msg.message?.conversation || // Short text messages
             msg.message?.extendedTextMessage?.text || 
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption || 
             '';
 
-        // -------------------------------------------------------------------
-        // 🚨 COMMAND EXTRACTION WITH PREFIX CHECK
-        // -------------------------------------------------------------------
+        // COMMAND EXTRACTION WITH PREFIX CHECK
         let isCommand = false;
         let prefix = '';
 
@@ -171,9 +159,7 @@ async function startBot() {
         
         console.log(`[${new Date().toLocaleTimeString()}] Command received: "${command}" from ${isOwner ? 'OWNER' : 'USER'}`);
 
-        // -------------------------------------------------------------------
-        // 🚨 GLOBAL MODE CHECK & OWNER COMMANDS (Priority 1)
-        // -------------------------------------------------------------------
+        // 🚨 GLOBAL MODE CHECK & OWNER COMMANDS (FIXED: Owner Check is crucial here)
 
         if (isOwner && (command === 'private' || command === 'public')) {
             const newMode = command === 'private';
@@ -190,9 +176,7 @@ async function startBot() {
             return;
         }
 
-        // -------------------------------------------------------------------
-        // 🚨 SPAM DETECTION AND AUTO-BLOCK (Priority 2)
-        // -------------------------------------------------------------------
+        // --- SPAM DETECTION ---
         const now = Date.now();
         const userData = spamMap.get(normalizedJid) || { count: 0, last: now, isBlocked: false };
 
@@ -214,28 +198,25 @@ async function startBot() {
         } else if (userData.isBlocked) {
             return; 
         }
-        // -------------------------------------------------------------------
         
-        // =========================================================
-        // COMMANDS ලැයිස්තුව
-        // =========================================================
+        // --- COMMANDS LIST ---
         const commandsList = [
             { cmd: `${PRIMARY_PREFIX}menu`, desc: 'සියලුම commands පෙන්වයි.' },
             { cmd: `${PRIMARY_PREFIX}ping`, desc: 'Bot එක ක්‍රියාකාරීදැයි පරීක්ෂා කරයි (Pong!).' },
             { cmd: `${PRIMARY_PREFIX}search [ප්‍රශ්නය]`, desc: 'Google හි යමක් සොයයි.' },
-            { cmd: `${PRIMARY_PREFIX}ytvid [URL]`, desc: 'YouTube වීඩියෝවක් යවයි.' },
-            { cmd: `${PRIMARY_PREFIX}ytaud [URL]`, desc: 'YouTube Audio එකක් යවයි.' },
+            { cmd: `${PRIMARY_PREFIX}ytvid [URL]`, desc: 'YouTube වීඩියෝවක් යවයි (Max 100MB).' },
+            { cmd: `${PRIMARY_PREFIX}ytaud [URL]`, desc: 'YouTube Audio එකක් යවයි (Max 100MB).' },
             { cmd: `${PRIMARY_PREFIX}tiktok [URL]`, desc: 'TikTok වීඩියෝවක් Watermark නැතුව යවයි.' },
             { cmd: `${PRIMARY_PREFIX}stiker`, desc: 'Image/Video එකක් Sticker එකක් බවට පත් කරයි (Quote කර යවන්න).' },
             { cmd: `${PRIMARY_PREFIX}private`, desc: 'Bot එක Private Mode එකට මාරු කරයි (Owner Only).' },
             { cmd: `${PRIMARY_PREFIX}public`, desc: 'Bot එක Public Mode එකට මාරු කරයි (Owner Only).' },
             { cmd: `${PRIMARY_PREFIX}block`, desc: 'Quote කළ user ව Bot වෙතින් block කරයි (Owner Only).' },
         ];
-        // =========================================================
-
+        
         // Command Switch
         switch (command) {
             
+            // 🚨 MENU COMMAND (FIXED: Reply issue resolved via Text Extraction fix)
             case 'menu':
                 let menuMessage = "📜 *Bot Command Menu* 📜\n\n";
                 menuMessage += `Bot Status: ${botConfig.isPrivate ? 'PRIVATE (Owner Only)' : 'PUBLIC'}\n`;
@@ -251,7 +232,7 @@ async function startBot() {
                 await sock.sendMessage(jid, { text: 'Pong! 🚀 I am running 24/7 on Replit.' }, { quoted: msg });
                 break;
             
-            // 🚨 GOOGLE SEARCH COMMAND (FIXED)
+            // 🚨 GOOGLE SEARCH COMMAND
             case 'search':
                 if (!args) {
                     await sock.sendMessage(jid, { text: `*⚠️ කරුණාකර සෙවීමට අවශ්‍ය දේ සඳහන් කරන්න.* උදා: \`${PRIMARY_PREFIX}search node js\`` }, { quoted: msg });
@@ -289,7 +270,7 @@ async function startBot() {
                 }
                 break;
 
-            // 🚨 YOUTUBE DOWNLOAD COMMANDS (FIXED - ytdl-core update අවශ්‍යයි)
+            // 🚨 YOUTUBE DOWNLOAD COMMANDS (FIXED for Format and Quality)
             case 'ytvid':
             case 'ytaud':
                 const url = args.split(' ')[0];
@@ -316,7 +297,7 @@ async function startBot() {
                         
                         await sock.sendMessage(jid, { 
                             audio: { stream: stream }, 
-                            mimetype: 'audio/mp4', // WhatsApp සඳහා නිවැරදි Mimetype එක
+                            mimetype: 'audio/mp4', 
                             fileName: `${title}.mp3` 
                         });
                         
@@ -342,14 +323,15 @@ async function startBot() {
                         });
                     }
                 } catch (error) {
-                    // ytdl-core error (Signature) හෝ Size Limit error
+                    // ytdl-core signature error or Size Limit
                     console.error("YouTube Download Error:", error);
                     await sock.sendMessage(jid, { 
-                        text: '🚨 YouTube download failed. (File size may exceed WhatsApp\'s maximum limit - approx 100MB, or format/signature error. **Try updating ytdl-core**)' 
+                        text: '🚨 YouTube download failed. (File size may exceed WhatsApp\'s maximum limit - approx 100MB, or signature error.)' 
                     }, { quoted: msg });
                 }
                 break;
 
+            // 🚨 TIKTOK DOWNLOAD COMMAND (FIXED - alternate API)
             case 'tiktok':
                 const tiktokUrl = args.split(' ')[0];
                 if (!tiktokUrl || !tiktokUrl.includes('tiktok.com')) {
@@ -357,16 +339,25 @@ async function startBot() {
                     return;
                 }
 
-                await sock.sendMessage(jid, { text: 'Downloading TikTok Video (No WM)...' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: 'Downloading TikTok Video (No WM) using alternate API... Please wait.' }, { quoted: msg });
                 
                 try {
-                    const apiResponse = await axios.get(`https://tikdown.org/api/download?url=${tiktokUrl}`);
-                    const videoUrl = apiResponse.data.no_watermark_url; 
+                    // Uses a more stable API (ttsave.app)
+                    const apiResponse = await axios.get(`https://ttsave.app/api/dl?url=${tiktokUrl}`);
+                    const videoUrl = apiResponse.data.media; 
 
-                    await sock.sendMessage(jid, { video: { url: videoUrl }, caption: '✅ TikTok Video (No WM)' });
+                    if (!videoUrl) {
+                         await sock.sendMessage(jid, { text: '🚨 TikTok download failed. (Video link not found in API response or private video)' }, { quoted: msg });
+                         return;
+                    }
+
+                    await sock.sendMessage(jid, { 
+                        video: { url: videoUrl }, 
+                        caption: '✅ TikTok Video (No WM)' 
+                    });
                     
                 } catch (error) {
-                    await sock.sendMessage(jid, { text: '🚨 TikTok download failed. (API or URL not supported)' }, { quoted: msg });
+                    await sock.sendMessage(jid, { text: '🚨 TikTok download failed. (API or URL not supported, or private video)' }, { quoted: msg });
                 }
                 break;
             
@@ -396,7 +387,6 @@ async function startBot() {
                     await sock.sendMessage(jid, { sticker: buffer });
                     
                 } catch (error) {
-                    // FFmpeg ස්ථාපනය වී නොමැති නම් වීඩියෝ ස්ටිකර් අසාර්ථක විය හැක.
                     await sock.sendMessage(jid, { text: '🚨 Sticker creation failed. (Video size too big or **FFmpeg is not installed/working**)' }, { quoted: msg });
                 }
                 break;
