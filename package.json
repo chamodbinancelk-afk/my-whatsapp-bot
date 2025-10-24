@@ -1,18 +1,30 @@
 {
-  "name": "your-whatsapp-bot",
+  "name": "advanced-whatsapp-bot",
   "version": "1.0.0",
-  "description": "24/7 WhatsApp Bot using Baileys on Replit",
-  "main": "index.js", // ඔබේ ප්‍රධාන file එකේ නම මෙතන තියෙන්න ඕනේ
+  "description": "24/7 Advanced WhatsApp Bot using Node.js and Baileys with multiple commands.",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "baileys",
+    "nodejs",
+    "24/7"
+  ],
+  "author": "Your Name",
+  "license": "ISC",
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.x.x", // නවතම Baileys version එකක් යොදන්න
-    "express": "^4.18.2",
-    "pino": "^8.x.x",
-    "qrcode-terminal": "^0.12.0"
+    "@whiskeysockets/baileys": "^6.x.x",
+    "axios": "^1.6.8",
+    "express": "^4.19.2",
+    "google-it": "^1.6.4",
+    "pino": "^8.21.0",
+    "qrcode-terminal": "^0.12.0",
+    "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
-    // ...
+    "eslint": "^8.57.0"
   }
 }
