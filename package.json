@@ -1,0 +1,18 @@
+{
+  "name": "your-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "24/7 WhatsApp Bot using Baileys on Replit",
+  "main": "index.js", // ඔබේ ප්‍රධාන file එකේ නම මෙතන තියෙන්න ඕනේ
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.x.x", // නවතම Baileys version එකක් යොදන්න
+    "express": "^4.18.2",
+    "pino": "^8.x.x",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    // ...
+  }
+}
