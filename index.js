@@ -9,9 +9,8 @@ const {
     DisconnectReason, 
     delay, 
     fetchLatestBaileysVersion,
-    downloadContentFromMessage, // Sticker Maker සඳහා අවශ්‍යයි
+    downloadContentFromMessage, 
     jidNormalizedUser,
-    proto 
 } = require('@whiskeysockets/baileys');
 
 // Keep-Alive Server Module
@@ -21,21 +20,35 @@ const keep_alive = require('./keep_alive');
 const pino = require('pino'); 
 const qrt = require('qrcode-terminal'); 
 const googleIt = require('google-it'); 
-const ytdl = require('ytdl-core'); // YouTube Video/Audio Download
+const ytdl = require('ytdl-core'); 
 const fs = require('fs'); 
-const axios = require('axios'); // HTTP Requests සඳහා (Sticker/TikTok)
+const axios = require('axios'); 
 
 // =========================================================
 // 2. CONFIGURATION (පෙර සැකසුම්)
 // =========================================================
 
-// Bot Ownerගේ JID එක (මෙය ඔබේ අංකයෙන් වෙනස් කරන්න)
+// Bot Ownerගේ JID එක (⚠️ මෙය ඔබේ අංකයෙන් වෙනස් කරන්න)
 const botOwnerJid = '947xxxxxxxxxx@s.whatsapp.net'; 
 
+// COMMAND PREFIXES
+const PREFIXES = ['.', '!']; 
+const PRIMARY_PREFIX = '.'; 
+
+// Bot Mode එක Load කිරීම
+// config.json file එක නොමැති නම් default විදියට Public (false) තබයි.
+let botConfig;
+try {
+    botConfig = JSON.parse(fs.readFileSync('./config.json'));
+} catch (e) {
+    botConfig = { isPrivate: false };
+    fs.writeFileSync('./config.json', JSON.stringify(botConfig, null, 2));
+}
+
 // Spam Control
-const SPAM_THRESHOLD = 5; // මිනිත්තු 5ක් තුළ උපරිම පණිවිඩ ගණන
-const SPAM_INTERVAL = 5 * 60 * 1000; // මිනිත්තු 5 (Milliseconds)
-const spamMap = new Map(); // Spam check සඳහා Map එකක්
+const SPAM_THRESHOLD = 5; 
+const SPAM_INTERVAL = 5 * 60 * 1000; 
+const spamMap = new Map(); 
 
 // =========================================================
 // 3. 24/7 KEEP-ALIVE SERVER එක ආරම්භ කිරීම
@@ -46,7 +59,7 @@ keep_alive();
 // 4. BOT එකේ ප්‍රධාන ආරම්භක FUNCTION එක
 // =========================================================
 async function startBot() {
-    console.log('Starting WhatsApp Bot...');
+    console.log(`Starting WhatsApp Bot in ${botConfig.isPrivate ? 'PRIVATE' : 'PUBLIC'} Mode...`);
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys'); 
     const { version } = await fetchLatestBaileysVersion();
@@ -74,7 +87,7 @@ async function startBot() {
                 console.log('You are logged out!');
             }
         } else if (connection === 'open') {
-            console.log(`✅ Bot Connected Successfully! JID: ${sock.user.id}`);
+            console.log(`✅ Bot Connected Successfully! Current Mode: ${botConfig.isPrivate ? 'PRIVATE' : 'PUBLIC'}`);
         }
 
         if (qr) {
@@ -96,17 +109,57 @@ async function startBot() {
         }
 
         const jid = msg.key.remoteJid; 
-        const normalizedJid = jidNormalizedUser(jid); // Normalization for security
+        const normalizedJid = jidNormalizedUser(jid); 
+        const isOwner = normalizedJid === botOwnerJid;
 
-        // Message Content and Command Extraction
+        // Message Content Extraction
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-        const command = text.split(' ')[0].toLowerCase(); 
-        const args = text.substring(command.length).trim(); 
-        
-        console.log(`[${new Date().toLocaleTimeString()}] New Command received from ${normalizedJid}: "${command}"`);
-        
+
         // -------------------------------------------------------------------
-        // 🚨 SPAM DETECTION AND AUTO-BLOCK
+        // 🚨 COMMAND EXTRACTION WITH PREFIX CHECK
+        // -------------------------------------------------------------------
+        let isCommand = false;
+        let prefix = '';
+
+        for (const p of PREFIXES) {
+            if (text.startsWith(p)) {
+                isCommand = true;
+                prefix = p;
+                break;
+            }
+        }
+
+        if (!isCommand) return; 
+        
+        // Command සහ Args ලබා ගැනීම
+        const commandText = text.substring(prefix.length).trim();
+        const command = commandText.split(' ')[0].toLowerCase(); 
+        const args = commandText.substring(command.length).trim(); 
+        
+        console.log(`[${new Date().toLocaleTimeString()}] New Command received: "${command}"`);
+
+        // -------------------------------------------------------------------
+        // 🚨 GLOBAL MODE CHECK & OWNER COMMANDS (Priority 1)
+        // -------------------------------------------------------------------
+
+        // Private/Public වෙනස් කිරීමේ commands Ownerට පමණක් සීමා කිරීම
+        if (isOwner && (command === 'private' || command === 'public')) {
+            const newMode = command === 'private';
+            botConfig.isPrivate = newMode;
+            fs.writeFileSync('./config.json', JSON.stringify(botConfig, null, 2)); // File එකට Save කිරීම
+
+            const status = newMode ? 'Owner-Only (Private)' : 'Public (Everyone can use)';
+            await sock.sendMessage(jid, { text: `✅ *Bot Mode Updated!* Bot එක දැන් *${status}* Mode එකේ ක්‍රියාත්මක වේ.` }, { quoted: msg });
+            return; 
+        }
+        
+        // Bot එක Private Mode එකේ තිබේ නම්, Owner නොවන Message එකක් Ignore කරන්න.
+        if (botConfig.isPrivate && !isOwner) {
+            return;
+        }
+
+        // -------------------------------------------------------------------
+        // 🚨 SPAM DETECTION AND AUTO-BLOCK (Priority 2)
         // -------------------------------------------------------------------
         const now = Date.now();
         const userData = spamMap.get(normalizedJid) || { count: 0, last: now, isBlocked: false };
@@ -127,47 +180,49 @@ async function startBot() {
             console.log(`❌ User ${normalizedJid} auto-blocked for spamming.`);
             return; 
         } else if (userData.isBlocked) {
-            return; // Blocked user. Ignore messages.
+            return; 
         }
         // -------------------------------------------------------------------
         
         // =========================================================
         // COMMANDS ලැයිස්තුව
         // =========================================================
-        const commands = [
-            { cmd: '!menu', desc: 'සියලුම commands පෙන්වයි.' },
-            { cmd: '!ping', desc: 'Bot එක ක්‍රියාකාරීදැයි පරීක්ෂා කරයි (Pong!).' },
-            { cmd: '!search [ප්‍රශ්නය]', desc: 'Google හි යමක් සොයයි.' },
-            { cmd: '!ytvid [URL]', desc: 'YouTube වීඩියෝවක් යවයි.' },
-            { cmd: '!ytaud [URL]', desc: 'YouTube Audio එකක් යවයි.' },
-            { cmd: '!tiktok [URL]', desc: 'TikTok වීඩියෝවක් Watermark නැතුව යවයි.' },
-            { cmd: '!stiker', desc: 'Image/Video එකක් Sticker එකක් බවට පත් කරයි (Quote කර යවන්න).' },
-            { cmd: '!block', desc: 'Quote කළ user ව Bot වෙතින් block කරයි (Owner Only).' },
+        const commandsList = [
+            { cmd: `${PRIMARY_PREFIX}menu`, desc: 'සියලුම commands පෙන්වයි.' },
+            { cmd: `${PRIMARY_PREFIX}ping`, desc: 'Bot එක ක්‍රියාකාරීදැයි පරීක්ෂා කරයි (Pong!).' },
+            { cmd: `${PRIMARY_PREFIX}search [ප්‍රශ්නය]`, desc: 'Google හි යමක් සොයයි.' },
+            { cmd: `${PRIMARY_PREFIX}ytvid [URL]`, desc: 'YouTube වීඩියෝවක් යවයි.' },
+            { cmd: `${PRIMARY_PREFIX}ytaud [URL]`, desc: 'YouTube Audio එකක් යවයි.' },
+            { cmd: `${PRIMARY_PREFIX}tiktok [URL]`, desc: 'TikTok වීඩියෝවක් Watermark නැතුව යවයි.' },
+            { cmd: `${PRIMARY_PREFIX}stiker`, desc: 'Image/Video එකක් Sticker එකක් බවට පත් කරයි (Quote කර යවන්න).' },
+            { cmd: `${PRIMARY_PREFIX}private`, desc: 'Bot එක Private Mode එකට මාරු කරයි (Owner Only).' },
+            { cmd: `${PRIMARY_PREFIX}public`, desc: 'Bot එක Public Mode එකට මාරු කරයි (Owner Only).' },
+            { cmd: `${PRIMARY_PREFIX}block`, desc: 'Quote කළ user ව Bot වෙතින් block කරයි (Owner Only).' },
         ];
         // =========================================================
 
         // Command Switch
         switch (command) {
-            case '!menu':
+            case 'menu':
                 let menuMessage = "📜 *Bot Command Menu* 📜\n\n";
+                menuMessage += `Bot Status: ${botConfig.isPrivate ? 'PRIVATE (Owner Only)' : 'PUBLIC'}\n`;
+                menuMessage += `ප්‍රධාන Prefix: *${PRIMARY_PREFIX}*\n\n`;
                 menuMessage += "මෙන්න ඔබට භාවිතා කළ හැකි commands ලැයිස්තුව:\n\n";
-                commands.forEach(c => {
+                commandsList.forEach(c => {
                     menuMessage += `👉 *${c.cmd}*: ${c.desc}\n`;
                 });
-                menuMessage += "\n_උපදෙස්: Command එකක් භාවිතා කිරීමේදී ! ලකුණ යෙදීමට මතක තබා ගන්න._";
                 await sock.sendMessage(jid, { text: menuMessage }, { quoted: msg });
                 break;
 
-            case '!ping':
+            case 'ping':
                 await sock.sendMessage(jid, { text: 'Pong! 🚀 I am running 24/7 on Replit.' }, { quoted: msg });
                 break;
             
-            case '!search':
+            case 'search':
                 if (!args) {
-                    await sock.sendMessage(jid, { text: '*⚠️ කරුණාකර සෙවීමට අවශ්‍ය දේ සඳහන් කරන්න.* උදා: `!search node js`' }, { quoted: msg });
+                    await sock.sendMessage(jid, { text: `*⚠️ කරුණාකර සෙවීමට අවශ්‍ය දේ සඳහන් කරන්න.* උදා: \`${PRIMARY_PREFIX}search node js\`` }, { quoted: msg });
                     return;
                 }
-
                 await sock.sendMessage(jid, { text: `🔎 *${args}* සොයමින් පවතී...` }, { quoted: msg });
                 try {
                     const results = await googleIt({ 'query': args, 'limit': 3 });
@@ -184,15 +239,15 @@ async function startBot() {
                 }
                 break;
 
-            case '!ytvid':
-            case '!ytaud':
+            case 'ytvid':
+            case 'ytaud':
                 const url = args.split(' ')[0];
                 if (!ytdl.validateURL(url)) {
                     await sock.sendMessage(jid, { text: '⚠️ *නිවැරදි YouTube URL එකක් දෙන්න.*' }, { quoted: msg });
                     return;
                 }
 
-                const type = command === '!ytvid' ? 'Video' : 'Audio';
+                const type = command === 'ytvid' ? 'Video' : 'Audio';
                 await sock.sendMessage(jid, { text: `Downloading ${type}... Please wait, this may take a moment. (Max 10MB)` }, { quoted: msg });
 
                 try {
@@ -201,26 +256,17 @@ async function startBot() {
                     
                     if (type === 'Audio') {
                         const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio' });
-                        await sock.sendMessage(jid, { 
-                            audio: { stream: stream },
-                            mimetype: 'audio/mp4',
-                            fileName: `${title}.mp3`
-                        });
+                        await sock.sendMessage(jid, { audio: { stream: stream }, mimetype: 'audio/mp4', fileName: `${title}.mp3` });
                     } else {
                         const stream = ytdl(url, { filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio, quality: 'highestvideo' });
-                        await sock.sendMessage(jid, { 
-                            video: { stream: stream },
-                            mimetype: 'video/mp4',
-                            fileName: `${title}.mp4`,
-                            caption: `🎥 *${title}*`
-                        });
+                        await sock.sendMessage(jid, { video: { stream: stream }, mimetype: 'video/mp4', fileName: `${title}.mp4', caption: '🎥 *${title}* });
                     }
                 } catch (error) {
                     await sock.sendMessage(jid, { text: '🚨 YouTube download failed. (Max file size may be an issue)' }, { quoted: msg });
                 }
                 break;
 
-            case '!tiktok':
+            case 'tiktok':
                 const tiktokUrl = args.split(' ')[0];
                 if (!tiktokUrl || !tiktokUrl.includes('tiktok.com')) {
                     await sock.sendMessage(jid, { text: '⚠️ *නිවැරදි TikTok URL එකක් දෙන්න.*' }, { quoted: msg });
@@ -230,22 +276,18 @@ async function startBot() {
                 await sock.sendMessage(jid, { text: 'Downloading TikTok Video (No WM)...' }, { quoted: msg });
                 
                 try {
-                    // මෙය තෙවන පාර්ශවීය API එකක් වන අතර එය ක්‍රියා විරහිත විය හැකිය
                     const apiResponse = await axios.get(`https://tikdown.org/api/download?url=${tiktokUrl}`);
                     const videoUrl = apiResponse.data.no_watermark_url; 
 
-                    await sock.sendMessage(jid, { 
-                        video: { url: videoUrl },
-                        caption: '✅ TikTok Video (No WM)'
-                    });
+                    await sock.sendMessage(jid, { video: { url: videoUrl }, caption: '✅ TikTok Video (No WM)' });
                     
                 } catch (error) {
                     await sock.sendMessage(jid, { text: '🚨 TikTok download failed. (API or URL not supported)' }, { quoted: msg });
                 }
                 break;
             
-            case '!stiker':
-            case '!sticker':
+            case 'stiker':
+            case 'sticker':
                 const quotedMsg = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
                 
                 if (!quotedMsg || (!quotedMsg.imageMessage && !quotedMsg.videoMessage)) {
@@ -257,7 +299,6 @@ async function startBot() {
                 
                 try {
                     let stream;
-                    
                     if (quotedMsg.imageMessage) {
                         stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
                     } else if (quotedMsg.videoMessage) {
@@ -265,29 +306,22 @@ async function startBot() {
                     }
                     
                     let buffer = Buffer.from([]);
-                    for await (const chunk of stream) {
-                        buffer = Buffer.concat([buffer, chunk]);
-                    }
+                    for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
                     
-                    // Send as Sticker
-                    await sock.sendMessage(jid, {
-                        sticker: buffer, // Baileys auto-converts buffer to sticker
-                    });
+                    await sock.sendMessage(jid, { sticker: buffer });
                     
                 } catch (error) {
                     await sock.sendMessage(jid, { text: '🚨 Sticker creation failed. (Video size too big or error)' }, { quoted: msg });
                 }
                 break;
 
-            case '!block':
-                // OWNER ONLY COMMAND
-                if (normalizedJid !== botOwnerJid) {
+            case 'block':
+                if (!isOwner) { // Owner Check
                     await sock.sendMessage(jid, { text: '❌ *Permission Denied!* මෙම command එක Ownerට පමණි.' }, { quoted: msg });
                     return;
                 }
 
                 const targetJid = msg.message.extendedTextMessage?.contextInfo?.participant; 
-
                 if (!targetJid) {
                     await sock.sendMessage(jid, { text: '👤 *Block කිරීමට අවශ්‍ය user ගේ message එක Quote කරන්න.*' }, { quoted: msg });
                     return;
@@ -296,10 +330,6 @@ async function startBot() {
                 await sock.updateBlockStatus(targetJid, 'block');
                 await sock.sendMessage(jid, { text: `✅ User ${targetJid.split('@')[0]} successfully *Blocked*.` }, { quoted: msg });
                 console.log(`Manual block: ${targetJid} blocked by owner.`);
-                break;
-
-            default:
-                // හඳුනා නොගත් command සඳහා ප්‍රතිචාරයක් යැවීමක් මෙහි සිදු නොවේ.
                 break;
         }
     });
