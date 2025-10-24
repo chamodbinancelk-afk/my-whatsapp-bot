@@ -23,6 +23,7 @@ const googleIt = require('google-it');
 const ytdl = require('ytdl-core'); 
 const fs = require('fs'); 
 const axios = require('axios'); 
+const { Boom } = require('@hapi/boom'); // Error Handling සඳහා
 
 // =========================================================
 // 2. CONFIGURATION (පෙර සැකසුම්)
@@ -36,7 +37,6 @@ const PREFIXES = ['.', '!'];
 const PRIMARY_PREFIX = '.'; 
 
 // Bot Mode එක Load කිරීම
-// config.json file එක නොමැති නම් default විදියට Public (false) තබයි.
 let botConfig;
 try {
     botConfig = JSON.parse(fs.readFileSync('./config.json'));
@@ -61,38 +61,54 @@ keep_alive();
 async function startBot() {
     console.log(`Starting WhatsApp Bot in ${botConfig.isPrivate ? 'PRIVATE' : 'PUBLIC'} Mode...`);
 
+    // Session Data Folder එක 'auth_info_baileys' ලෙස සකසයි
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys'); 
+    
+    // නවතම Baileys Version එක ලබා ගැනීම
     const { version } = await fetchLatestBaileysVersion();
+    
+    console.log(`Using Baileys version: ${version.join('.')}`);
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }), 
         printQRInTerminal: true, 
         auth: state,
         browser: ['My-Advanced-Bot', 'Safari', '1.0.0'],
+        version: version, // Version එක නිවැරදිව සකසයි
     });
 
     // =====================================================
     // 5. EVENT HANDLERS
     // =====================================================
 
-    // 5.1. Connection Update (Login/Reconnect)
+    // 5.1. Connection Update (Login/Reconnect/QR)
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) {
-                delay(3000).then(() => startBot()); 
-            } else {
-                console.log('You are logged out!');
-            }
-        } else if (connection === 'open') {
-            console.log(`✅ Bot Connected Successfully! Current Mode: ${botConfig.isPrivate ? 'PRIVATE' : 'PUBLIC'}`);
+        if (qr) {
+            console.log('\n=============================================');
+            console.log('🔗 QR CODE RECEIVED. SCAN NOW TO CONNECT 🔗');
+            console.log('=============================================');
+            qrt.generate(qr, { small: true }); 
         }
 
-        if (qr) {
-            console.log('QR Code received. Please scan it now:');
-            qrt.generate(qr, { small: true }); 
+        if (connection === 'close') {
+            let reason = new Boom(lastDisconnect.error)?.output?.statusCode;
+            
+            // Logged Out හෝ QR Code Expired වූ විට නැවත ආරම්භ කිරීම අවශ්‍යයි
+            if (reason === DisconnectReason.loggedOut || reason === DisconnectReason.connectionClosed || reason === 405) {
+                console.log(`❌ Connection Closed/Logged Out. Reason: ${reason}. Deleting old session and restarting...`);
+                
+                // පැරණි session එක delete කිරීම (Session Errors fix කිරීමට)
+                fs.rmSync('auth_info_baileys', { recursive: true, force: true });
+                delay(3000).then(() => startBot()); 
+            } else {
+                // වෙනත් දෝෂයක් නම්, ටික වෙලාවක් ඉඳලා නැවත උත්සාහ කරන්න
+                console.log(`⚠️ Connection closed unexpectedly. Reason: ${reason}. Restarting in 5s.`);
+                delay(5000).then(() => startBot()); 
+            }
+        } else if (connection === 'open') {
+            console.log(`✅ Bot Connected Successfully! JID: ${sock.user.id}`);
         }
     });
 
@@ -112,7 +128,6 @@ async function startBot() {
         const normalizedJid = jidNormalizedUser(jid); 
         const isOwner = normalizedJid === botOwnerJid;
 
-        // Message Content Extraction
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
         // -------------------------------------------------------------------
@@ -131,29 +146,26 @@ async function startBot() {
 
         if (!isCommand) return; 
         
-        // Command සහ Args ලබා ගැනීම
         const commandText = text.substring(prefix.length).trim();
         const command = commandText.split(' ')[0].toLowerCase(); 
         const args = commandText.substring(command.length).trim(); 
         
-        console.log(`[${new Date().toLocaleTimeString()}] New Command received: "${command}"`);
+        console.log(`[${new Date().toLocaleTimeString()}] Command received: "${command}"`);
 
         // -------------------------------------------------------------------
         // 🚨 GLOBAL MODE CHECK & OWNER COMMANDS (Priority 1)
         // -------------------------------------------------------------------
 
-        // Private/Public වෙනස් කිරීමේ commands Ownerට පමණක් සීමා කිරීම
         if (isOwner && (command === 'private' || command === 'public')) {
             const newMode = command === 'private';
             botConfig.isPrivate = newMode;
-            fs.writeFileSync('./config.json', JSON.stringify(botConfig, null, 2)); // File එකට Save කිරීම
+            fs.writeFileSync('./config.json', JSON.stringify(botConfig, null, 2)); 
 
             const status = newMode ? 'Owner-Only (Private)' : 'Public (Everyone can use)';
             await sock.sendMessage(jid, { text: `✅ *Bot Mode Updated!* Bot එක දැන් *${status}* Mode එකේ ක්‍රියාත්මක වේ.` }, { quoted: msg });
             return; 
         }
         
-        // Bot එක Private Mode එකේ තිබේ නම්, Owner නොවන Message එකක් Ignore කරන්න.
         if (botConfig.isPrivate && !isOwner) {
             return;
         }
@@ -316,7 +328,7 @@ async function startBot() {
                 break;
 
             case 'block':
-                if (!isOwner) { // Owner Check
+                if (!isOwner) { 
                     await sock.sendMessage(jid, { text: '❌ *Permission Denied!* මෙම command එක Ownerට පමණි.' }, { quoted: msg });
                     return;
                 }
