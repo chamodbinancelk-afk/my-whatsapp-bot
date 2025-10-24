@@ -22,9 +22,13 @@
     "google-it": "^1.6.4",
     "pino": "^8.21.0",
     "qrcode-terminal": "^0.12.0",
-    "ytdl-core": "^4.11.5"
+    "ytdl-core": "^4.11.5",
+    "@hapi/boom": "^10.0.1"  
   },
   "devDependencies": {
     "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=18.0.0" 
   }
 }
