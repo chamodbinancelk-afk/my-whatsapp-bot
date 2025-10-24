@@ -1,4 +1,4 @@
-// index.js (Audio/Video Quality Update)
+// index.js (Final Fixes for Google Search, YouTube Downloads, and Sticker Command)
 
 // =========================================================
 // 1. MODULES LOAD කිරීම
@@ -20,12 +20,11 @@ const keep_alive = require('./keep_alive');
 const pino = require('pino'); 
 const qrt = require('qrcode-terminal'); 
 
-// 🚨 GOOGLE-IT වෙනුවට නව GOOGLE SEARCH API MODULES එකතු කරන ලදි
+// 🚨 GOOGLE SEARCH API MODULES (FIXED)
 const { GoogleAuth } = require('google-auth-library');
-const { customsearch } = require('@google/customsearch');
-// 🚨 (ඔබට package.json එකේ @google/customsearch install කිරීමට සිදුවේ)
+const { customsearch } = require('@google/customsearch'); // ⚠️ Terminal: npm install @google/customsearch
 
-const ytdl = require('ytdl-core'); 
+const ytdl = require('ytdl-core'); // ⚠️ Terminal: npm install ytdl-core@latest
 const fs = require('fs'); 
 const axios = require('axios'); 
 const { Boom } = require('@hapi/boom'); // Error Handling සඳහා
@@ -36,7 +35,7 @@ const { Boom } = require('@hapi/boom'); // Error Handling සඳහා
 
 // 🚨 OWNER JID එක: (⚠️ මෙය ඔබගේ නිවැරදි WhatsApp අංකයට වෙනස් කරන්න)
 // උදා: '94712345678@s.whatsapp.net'
-const botOwnerJid = '94782507580@s.whatsapp.net'; // <--- ⚠️ මෙතැන ඔබේ අංකය ඇතුළත් කරන්න
+const botOwnerJid = '947xxxxxxxxxx@s.whatsapp.net'; // <--- ⚠️ මෙතැන ඔබේ අංකය ඇතුළත් කරන්න!
 
 // COMMAND PREFIXES
 const PREFIXES = ['.', '!']; 
@@ -142,7 +141,7 @@ async function startBot() {
         const normalizedJid = jidNormalizedUser(msg.key.remoteJid); 
         const isOwner = normalizedJid === botOwnerJid; // Owner Check
 
-        // Message Content Extraction FIX
+        // Message Content Extraction
         const text = 
             msg.message?.conversation || 
             msg.message?.extendedTextMessage?.text || 
@@ -218,7 +217,7 @@ async function startBot() {
         // -------------------------------------------------------------------
         
         // =========================================================
-        // COMMANDS ලැයිස්තුව (List unchanged)
+        // COMMANDS ලැයිස්තුව
         // =========================================================
         const commandsList = [
             { cmd: `${PRIMARY_PREFIX}menu`, desc: 'සියලුම commands පෙන්වයි.' },
@@ -236,8 +235,7 @@ async function startBot() {
 
         // Command Switch
         switch (command) {
-            // ... (Other commands remain the same) ...
-
+            
             case 'menu':
                 let menuMessage = "📜 *Bot Command Menu* 📜\n\n";
                 menuMessage += `Bot Status: ${botConfig.isPrivate ? 'PRIVATE (Owner Only)' : 'PUBLIC'}\n`;
@@ -259,7 +257,6 @@ async function startBot() {
                     await sock.sendMessage(jid, { text: `*⚠️ කරුණාකර සෙවීමට අවශ්‍ය දේ සඳහන් කරන්න.* උදා: \`${PRIMARY_PREFIX}search node js\`` }, { quoted: msg });
                     return;
                 }
-                // ⚠️ API Key එක භාවිතා කරන නිසා, message එක යාවත්කාලීන කර ඇත.
                 await sock.sendMessage(jid, { text: `🔎 *"${args}"* සොයමින් පවතී (Google API)...` }, { quoted: msg });
                 
                 try {
@@ -281,19 +278,18 @@ async function startBot() {
                     results.forEach((result, index) => {
                         replyText += `*${index + 1}. ${result.title.trim()}*\n`;
                         replyText += `🔗 URL: ${result.link}\n`;
-                        // snippet (සාරාංශය) පරීක්ෂා කිරීම
                         replyText += `_Summary: ${result.snippet ? result.snippet.trim() : 'No summary available.'}_\n\n`;
                     });
 
                     await sock.sendMessage(jid, { text: replyText }, { quoted: msg });
 
                 } catch (error) {
-                    // API 403 හෝ වෙනත් දෝෂයක් නම්, එය මෙතැනින් පෙන්වයි.
                     console.error('Google Search API Error:', error.message);
                     await sock.sendMessage(jid, { text: '🚨 *Google Search Error:* සෙවීම අතරතුර දෝෂයක් ඇති විය. (API Key/CX ID හෝ දෛනික සීමාව පරීක්ෂා කරන්න)' }, { quoted: msg });
                 }
                 break;
 
+            // 🚨 YOUTUBE DOWNLOAD COMMANDS (FIXED - ytdl-core update අවශ්‍යයි)
             case 'ytvid':
             case 'ytaud':
                 const url = args.split(' ')[0];
@@ -303,7 +299,6 @@ async function startBot() {
                 }
 
                 const type = command === 'ytvid' ? 'Video' : 'Audio';
-                // ⚠️ Quality වෙනස්කම් සහ Error message යාවත්කාලීන කර ඇත.
                 await sock.sendMessage(jid, { text: `Downloading ${type} (Highest Quality)... Please wait, this may take a moment.` }, { quoted: msg });
 
                 try {
@@ -311,17 +306,47 @@ async function startBot() {
                     const title = info.videoDetails.title.replace(/[^a-zA-Z0-9 ]/g, '');
                     
                     if (type === 'Audio') {
-                        // Quality එක 'highestaudio' ලෙස වෙනස් කර ඇත.
-                        const stream = ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }); 
-                        await sock.sendMessage(jid, { audio: { stream: stream }, mimetype: 'audio/mp4', fileName: `${title}.mp3` });
+                        // වඩාත් විශ්වාසදායක M4A Format එකක් (128kbps) තෝරා ගැනීමට උත්සාහ කරයි
+                        const format = ytdl.chooseFormat(info.formats, { 
+                            filter: 'audioonly', 
+                            quality: ['140', 'highestaudio'] 
+                        });
+                        
+                        const stream = ytdl(url, { format: format }); 
+                        
+                        await sock.sendMessage(jid, { 
+                            audio: { stream: stream }, 
+                            mimetype: 'audio/mp4', // WhatsApp සඳහා නිවැරදි Mimetype එක
+                            fileName: `${title}.mp3` 
+                        });
+                        
                     } else {
-                        // Quality එක 'highest' ලෙස වෙනස් කර ඇත.
-                        const stream = ytdl(url, { filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio, quality: 'highest' });
-                        await sock.sendMessage(jid, { video: { stream: stream }, mimetype: 'video/mp4', fileName: `${title}.mp4`, caption: `🎥 *${title}*` });
+                        // MP4 Container එකේ ඇති highest quality එක තෝරා ගනී.
+                        const format = ytdl.chooseFormat(info.formats, { 
+                            filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio, 
+                            quality: 'highest' 
+                        });
+                        
+                        if (!format) {
+                            await sock.sendMessage(jid, { text: '⚠️ *Video Format Error:* MP4 සහ Audio සහිත Video Stream එකක් සොයා ගැනීමට නොහැකි විය.' }, { quoted: msg });
+                            return;
+                        }
+                        
+                        const stream = ytdl(url, { format: format });
+                        
+                        await sock.sendMessage(jid, { 
+                            video: { stream: stream }, 
+                            mimetype: 'video/mp4', 
+                            fileName: `${title}.mp4`, 
+                            caption: `🎥 *${title}*` 
+                        });
                     }
                 } catch (error) {
-                    // Error message එක යාවත්කාලීන කර ඇත.
-                    await sock.sendMessage(jid, { text: '🚨 YouTube download failed. (File size may exceed WhatsApp\'s maximum limit - approx 100MB)' }, { quoted: msg });
+                    // ytdl-core error (Signature) හෝ Size Limit error
+                    console.error("YouTube Download Error:", error);
+                    await sock.sendMessage(jid, { 
+                        text: '🚨 YouTube download failed. (File size may exceed WhatsApp\'s maximum limit - approx 100MB, or format/signature error. **Try updating ytdl-core**)' 
+                    }, { quoted: msg });
                 }
                 break;
 
@@ -362,7 +387,6 @@ async function startBot() {
                     if (quotedMsg.imageMessage) {
                         stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
                     } else if (quotedMsg.videoMessage) {
-                        // ⚠️ වීඩියෝ ස්ටිකර් සඳහා FFmpeg අත්‍යවශ්‍යයි.
                         stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
                     }
                     
@@ -372,7 +396,7 @@ async function startBot() {
                     await sock.sendMessage(jid, { sticker: buffer });
                     
                 } catch (error) {
-                    // FFmpeg ස්ථාපනය වී නොමැති නම් මෙවැනි error එකක් ඇතිවිය හැක.
+                    // FFmpeg ස්ථාපනය වී නොමැති නම් වීඩියෝ ස්ටිකර් අසාර්ථක විය හැක.
                     await sock.sendMessage(jid, { text: '🚨 Sticker creation failed. (Video size too big or **FFmpeg is not installed/working**)' }, { quoted: msg });
                 }
                 break;
