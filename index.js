@@ -1,4 +1,4 @@
-// index.js
+// index.js (Audio/Video Quality Update)
 
 // =========================================================
 // 1. MODULES LOAD කිරීම
@@ -19,7 +19,12 @@ const keep_alive = require('./keep_alive');
 // Utility Modules & Dependencies
 const pino = require('pino'); 
 const qrt = require('qrcode-terminal'); 
-const googleIt = require('google-it'); 
+
+// 🚨 GOOGLE-IT වෙනුවට නව GOOGLE SEARCH API MODULES එකතු කරන ලදි
+const { GoogleAuth } = require('google-auth-library');
+const { customsearch } = require('@google/customsearch');
+// 🚨 (ඔබට package.json එකේ @google/customsearch install කිරීමට සිදුවේ)
+
 const ytdl = require('ytdl-core'); 
 const fs = require('fs'); 
 const axios = require('axios'); 
@@ -29,12 +34,21 @@ const { Boom } = require('@hapi/boom'); // Error Handling සඳහා
 // 2. CONFIGURATION (පෙර සැකසුම්)
 // =========================================================
 
-// Bot Ownerගේ JID එක (⚠️ මෙය ඔබේ අංකයෙන් වෙනස් කරන්න)
-const botOwnerJid = '947xxxxxxxxxx@s.whatsapp.net'; 
+// 🚨 OWNER JID එක: (⚠️ මෙය ඔබගේ නිවැරදි WhatsApp අංකයට වෙනස් කරන්න)
+// උදා: '94712345678@s.whatsapp.net'
+const botOwnerJid = '94782507580@s.whatsapp.net'; // <--- ⚠️ මෙතැන ඔබේ අංකය ඇතුළත් කරන්න
 
 // COMMAND PREFIXES
 const PREFIXES = ['.', '!']; 
 const PRIMARY_PREFIX = '.'; 
+
+// 🚨 GOOGLE SEARCH API KEYS (FIXED)
+const GOOGLE_API_KEY = 'AIzaSyA5_GUtx7lkQRTc2rwiFCKL6HBhaC6id8E'; 
+const SEARCH_ENGINE_CX = '50dad8b62a6ed49c0'; 
+
+// Client එක Initialize කිරීම (නව API සඳහා)
+const auth = new GoogleAuth();
+const customSearchClient = customsearch({ version: 'v1', auth: auth });
 
 // Bot Mode එක Load කිරීම
 let botConfig;
@@ -125,10 +139,16 @@ async function startBot() {
         }
 
         const jid = msg.key.remoteJid; 
-        const normalizedJid = jidNormalizedUser(jid); 
-        const isOwner = normalizedJid === botOwnerJid;
+        const normalizedJid = jidNormalizedUser(msg.key.remoteJid); 
+        const isOwner = normalizedJid === botOwnerJid; // Owner Check
 
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+        // Message Content Extraction FIX
+        const text = 
+            msg.message?.conversation || 
+            msg.message?.extendedTextMessage?.text || 
+            msg.message?.imageMessage?.caption ||
+            msg.message?.videoMessage?.caption || 
+            '';
 
         // -------------------------------------------------------------------
         // 🚨 COMMAND EXTRACTION WITH PREFIX CHECK
@@ -150,7 +170,7 @@ async function startBot() {
         const command = commandText.split(' ')[0].toLowerCase(); 
         const args = commandText.substring(command.length).trim(); 
         
-        console.log(`[${new Date().toLocaleTimeString()}] Command received: "${command}"`);
+        console.log(`[${new Date().toLocaleTimeString()}] Command received: "${command}" from ${isOwner ? 'OWNER' : 'USER'}`);
 
         // -------------------------------------------------------------------
         // 🚨 GLOBAL MODE CHECK & OWNER COMMANDS (Priority 1)
@@ -167,6 +187,7 @@ async function startBot() {
         }
         
         if (botConfig.isPrivate && !isOwner) {
+            await sock.sendMessage(jid, { text: '🔒 *Bot is in Private Mode.* Commands are restricted to the Owner only.' }, { quoted: msg });
             return;
         }
 
@@ -197,7 +218,7 @@ async function startBot() {
         // -------------------------------------------------------------------
         
         // =========================================================
-        // COMMANDS ලැයිස්තුව
+        // COMMANDS ලැයිස්තුව (List unchanged)
         // =========================================================
         const commandsList = [
             { cmd: `${PRIMARY_PREFIX}menu`, desc: 'සියලුම commands පෙන්වයි.' },
@@ -215,6 +236,8 @@ async function startBot() {
 
         // Command Switch
         switch (command) {
+            // ... (Other commands remain the same) ...
+
             case 'menu':
                 let menuMessage = "📜 *Bot Command Menu* 📜\n\n";
                 menuMessage += `Bot Status: ${botConfig.isPrivate ? 'PRIVATE (Owner Only)' : 'PUBLIC'}\n`;
@@ -230,24 +253,44 @@ async function startBot() {
                 await sock.sendMessage(jid, { text: 'Pong! 🚀 I am running 24/7 on Replit.' }, { quoted: msg });
                 break;
             
+            // 🚨 GOOGLE SEARCH COMMAND (FIXED)
             case 'search':
                 if (!args) {
                     await sock.sendMessage(jid, { text: `*⚠️ කරුණාකර සෙවීමට අවශ්‍ය දේ සඳහන් කරන්න.* උදා: \`${PRIMARY_PREFIX}search node js\`` }, { quoted: msg });
                     return;
                 }
-                await sock.sendMessage(jid, { text: `🔎 *${args}* සොයමින් පවතී...` }, { quoted: msg });
+                // ⚠️ API Key එක භාවිතා කරන නිසා, message එක යාවත්කාලීන කර ඇත.
+                await sock.sendMessage(jid, { text: `🔎 *"${args}"* සොයමින් පවතී (Google API)...` }, { quoted: msg });
+                
                 try {
-                    const results = await googleIt({ 'query': args, 'limit': 3 });
+                    const response = await customSearchClient.cse.list({
+                        q: args,
+                        cx: SEARCH_ENGINE_CX,
+                        key: GOOGLE_API_KEY, 
+                        num: 3, 
+                    });
+
+                    const results = response.data.items;
+
+                    if (!results || results.length === 0) {
+                        await sock.sendMessage(jid, { text: `*⚠️ Search Result Found Failed.* සෙවීමට ප්‍රතිඵල හමු නොවීය.` }, { quoted: msg });
+                        return;
+                    }
+
                     let replyText = `🌐 *Google Search Results* for *"${args}"*\n\n`;
                     results.forEach((result, index) => {
                         replyText += `*${index + 1}. ${result.title.trim()}*\n`;
                         replyText += `🔗 URL: ${result.link}\n`;
-                        replyText += `_Summary: ${result.snippet.trim()}_\n\n`;
+                        // snippet (සාරාංශය) පරීක්ෂා කිරීම
+                        replyText += `_Summary: ${result.snippet ? result.snippet.trim() : 'No summary available.'}_\n\n`;
                     });
+
                     await sock.sendMessage(jid, { text: replyText }, { quoted: msg });
 
                 } catch (error) {
-                    await sock.sendMessage(jid, { text: '🚨 *Google Search Error:* සෙවීම අතරතුර දෝෂයක් ඇති විය.' }, { quoted: msg });
+                    // API 403 හෝ වෙනත් දෝෂයක් නම්, එය මෙතැනින් පෙන්වයි.
+                    console.error('Google Search API Error:', error.message);
+                    await sock.sendMessage(jid, { text: '🚨 *Google Search Error:* සෙවීම අතරතුර දෝෂයක් ඇති විය. (API Key/CX ID හෝ දෛනික සීමාව පරීක්ෂා කරන්න)' }, { quoted: msg });
                 }
                 break;
 
@@ -260,21 +303,25 @@ async function startBot() {
                 }
 
                 const type = command === 'ytvid' ? 'Video' : 'Audio';
-                await sock.sendMessage(jid, { text: `Downloading ${type}... Please wait, this may take a moment. (Max 10MB)` }, { quoted: msg });
+                // ⚠️ Quality වෙනස්කම් සහ Error message යාවත්කාලීන කර ඇත.
+                await sock.sendMessage(jid, { text: `Downloading ${type} (Highest Quality)... Please wait, this may take a moment.` }, { quoted: msg });
 
                 try {
                     const info = await ytdl.getInfo(url);
                     const title = info.videoDetails.title.replace(/[^a-zA-Z0-9 ]/g, '');
                     
                     if (type === 'Audio') {
-                        const stream = ytdl(url, { filter: 'audioonly', quality: 'lowestaudio' });
+                        // Quality එක 'highestaudio' ලෙස වෙනස් කර ඇත.
+                        const stream = ytdl(url, { filter: 'audioonly', quality: 'highestaudio' }); 
                         await sock.sendMessage(jid, { audio: { stream: stream }, mimetype: 'audio/mp4', fileName: `${title}.mp3` });
                     } else {
-                        const stream = ytdl(url, { filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio, quality: 'highestvideo' });
-                        await sock.sendMessage(jid, { video: { stream: stream }, mimetype: 'video/mp4', fileName: `${title}.mp4', caption: '🎥 *${title}* });
+                        // Quality එක 'highest' ලෙස වෙනස් කර ඇත.
+                        const stream = ytdl(url, { filter: format => format.container === 'mp4' && format.hasVideo && format.hasAudio, quality: 'highest' });
+                        await sock.sendMessage(jid, { video: { stream: stream }, mimetype: 'video/mp4', fileName: `${title}.mp4`, caption: `🎥 *${title}*` });
                     }
                 } catch (error) {
-                    await sock.sendMessage(jid, { text: '🚨 YouTube download failed. (Max file size may be an issue)' }, { quoted: msg });
+                    // Error message එක යාවත්කාලීන කර ඇත.
+                    await sock.sendMessage(jid, { text: '🚨 YouTube download failed. (File size may exceed WhatsApp\'s maximum limit - approx 100MB)' }, { quoted: msg });
                 }
                 break;
 
@@ -298,6 +345,7 @@ async function startBot() {
                 }
                 break;
             
+            // 🚨 STICKER COMMAND (FFmpeg අවශ්‍යයි)
             case 'stiker':
             case 'sticker':
                 const quotedMsg = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -314,6 +362,7 @@ async function startBot() {
                     if (quotedMsg.imageMessage) {
                         stream = await downloadContentFromMessage(quotedMsg.imageMessage, 'image');
                     } else if (quotedMsg.videoMessage) {
+                        // ⚠️ වීඩියෝ ස්ටිකර් සඳහා FFmpeg අත්‍යවශ්‍යයි.
                         stream = await downloadContentFromMessage(quotedMsg.videoMessage, 'video');
                     }
                     
@@ -323,7 +372,8 @@ async function startBot() {
                     await sock.sendMessage(jid, { sticker: buffer });
                     
                 } catch (error) {
-                    await sock.sendMessage(jid, { text: '🚨 Sticker creation failed. (Video size too big or error)' }, { quoted: msg });
+                    // FFmpeg ස්ථාපනය වී නොමැති නම් මෙවැනි error එකක් ඇතිවිය හැක.
+                    await sock.sendMessage(jid, { text: '🚨 Sticker creation failed. (Video size too big or **FFmpeg is not installed/working**)' }, { quoted: msg });
                 }
                 break;
 
